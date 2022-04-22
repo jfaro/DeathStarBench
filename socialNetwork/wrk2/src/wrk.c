@@ -80,10 +80,14 @@ static void usage() {
            "  Time arguments may include a time unit (2s, 2m, 2h)            \n");
 }
 
+// ----------------------------------------------
+// Main
+// ----------------------------------------------
 int main(int argc, char **argv) {
     char *url, **headers = zmalloc(argc * sizeof(char *));
     struct http_parser_url parts = {};
 
+    // Parse arguments
     if (parse_args(&cfg, &url, &parts, headers, argc, argv)) {
         usage();
         exit(1);
@@ -114,6 +118,7 @@ int main(int argc, char **argv) {
     statistics.requests = stats_alloc(10);
     thread *threads = zcalloc(cfg.threads * sizeof(thread));
 
+    // Initialize HDR histogram
     hdr_init(1, MAX_LATENCY, 3, &(statistics.requests->histogram));
 
     lua_State *L = script_create(cfg.script, url, headers);
@@ -123,10 +128,12 @@ int main(int argc, char **argv) {
         exit(1);
     }
 
+    // Prepare wordload generation params
     uint64_t connections = cfg.connections / cfg.threads;
     uint64_t throughput = cfg.rate / cfg.threads;
     uint64_t stop_at     = time_us() + (cfg.duration * 1000000);
 
+    // Spawn NUM_THREADS threads
     for (uint64_t i = 0; i < cfg.threads; i++) {
         thread *t = &threads[i];
         t->tid           = i;
@@ -180,13 +187,21 @@ int main(int argc, char **argv) {
     hdr_init(1, MAX_LATENCY, 3, &latency_histogram);
     hdr_init(1, MAX_LATENCY, 3, &real_latency_histogram);
 
+    // Join all threads
     for (uint64_t i = 0; i < cfg.threads; i++) {
         thread *t = &threads[i];
         pthread_join(t->thread, NULL);
     }
 
+    // Save workload runtime
     uint64_t runtime_us = time_us() - start;
 
+    // Print filename
+    char filename[20] = "latencies.txt";
+    printf("Latencies recorded to file: %s\n", filename);
+    FILE* ff = fopen(filename, "w");    // Clear latencies.txt and open
+
+    // Save thread stats
     for (uint64_t i = 0; i < cfg.threads; i++) {
         thread *t = &threads[i];
         complete += t->complete;
@@ -201,17 +216,19 @@ int main(int argc, char **argv) {
         hdr_add(latency_histogram, t->latency_histogram);
         hdr_add(real_latency_histogram, t->real_latency_histogram);
 
+        // Print all request latencies
         if (cfg.print_all_responses) {
-            char filename[10] = {0};
-            sprintf(filename, "%" PRIu64 ".txt", i);
-            FILE* ff = fopen(filename, "w");
             uint64_t nnum=MAXL;
             if ((t->complete) < nnum) nnum = t->complete;
+
+            // Print each request's latency from thread i
+            // Space delimited, newline at the end of each thread's output
             for (uint64_t j=1; j < nnum; ++j)
-                fprintf(ff, "%" PRIu64 "\n", raw_latency[i][j]);
-            fclose(ff);
+                fprintf(ff, "%" PRIu64 " ", raw_latency[i][j]);
+            fprintf(ff, "\n");
         }
     }
+    fclose(ff);
 
     long double runtime_s   = runtime_us / 1000000.0;
     long double req_per_s   = complete   / runtime_s;
@@ -280,7 +297,6 @@ void *thread_main(void *arg) {
         thread->ff = fopen(filename, "w");
     }
 
-
     double throughput = (thread->throughput / 1000000.0) / thread->connections;
 
     connection *c = thread->cs;
@@ -304,7 +320,8 @@ void *thread_main(void *arg) {
 
     aeCreateTimeEvent(loop, calibrate_delay, calibrate, thread, NULL);
     aeCreateTimeEvent(loop, timeout_delay, check_timeouts, thread, NULL);
-
+    
+    printf("* starting thread\n");
     thread->start = time_us();
     aeMain(loop);
 

@@ -363,6 +363,30 @@ void ComposePostHandler::ComposePost(
     const std::string &text, const std::vector<int64_t> &media_ids,
     const std::vector<std::string> &media_types, const PostType::type post_type,
     const std::map<std::string, std::string> &carrier) {
+
+  // NOTE: Added by James Wu 4/21/22
+  // this code was added to experiment with using up all the memory of the container, in hopes of expanding
+  // this idea to use memory allocation failure to cause a feedback loop of more allocation failures
+  //
+  // no progress has been made: the cout statement was not observed in the logs
+  // note: the lines in the comments below were added to docker-compose.yml under the compose-post-service section
+  //    to limit the memory allocated to the container:
+  //
+  // deploy:
+  //   resources:
+  //     limits:
+  //       memory: 1000M
+  //
+  // experiment with an intentional memory leak to confirm that we can capture a malloc failure
+  // 5MB / 4B = 1310720
+  int n = 1310720 * 100;
+  int* ptr = (int*)malloc(n * sizeof(int));
+  std::cout << "RUNNING" << std::endl;
+  if (ptr == NULL) {
+    std::cout << "582 ERROR: Memory not allocated.\n" << std::endl;
+  }
+
+
   TextMapReader reader(carrier);
   auto parent_span = opentracing::Tracer::Global()->Extract(reader);
   auto span = opentracing::Tracer::Global()->StartSpan(
