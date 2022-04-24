@@ -42,7 +42,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 30M
+          memory: 100M
+    ulimits:
+      data: 153600000
     hostname: compose-post-service
     #    ports:
     #      - 10001:9090
