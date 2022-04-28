@@ -282,6 +282,7 @@ void ComposePostHandler::_UploadPostHelper(
   // Store post to db
   try {
     post_storage_client->StorePost(req_id, post, writer_text_map);
+    std::cout << "Trigger - in try block (StorePost succeeded)" << std::endl;
   } catch (...) {
     _post_storage_client_pool->Remove(post_storage_client_wrapper);
 
@@ -290,27 +291,31 @@ void ComposePostHandler::_UploadPostHelper(
     // ----------------------------------------------------------------
     std::cout << "Trigger - in catch block (StorePost failed)" << std::endl;
 
-    // int n = 1310720;  // 5MB
-    // int* ptr = (int*)malloc(n * sizeof(int));
+    int n = 1310720 * 10;  // 5MB * 10 => 50MB
+    int* ptr = (int*)malloc(n * sizeof(int));
       
-    // // If allocation fails, retry MAX_RETRIES times or until success
-    // int MAX_RETRIES = 20;
-    // int retry_count = 0;
+    // If allocation fails, retry MAX_RETRIES times or until success
+    int MAX_RETRIES = 20;
+    int retry_count = 0;
 
-    // while (ptr == NULL && retry_count < MAX_RETRIES) {
-    //   std::cout << "Trigger - allocation failed, retry count: " << retry_count << std::endl;
-    //   retry_count += 1;
-    //   sleep(0.1);
-    //   ptr = (int*)malloc(n * sizeof(int));
-    // }
+    while (ptr == NULL && retry_count < MAX_RETRIES) {
+      std::cout << "Trigger - allocation failed, retry count: " << retry_count << std::endl;
+      retry_count += 1;
+      sleep(0.1);
+      ptr = (int*)malloc(n * sizeof(int));
+    }
 
-    // // Write mem and sleep
-    // if (ptr != NULL) {
-    //   std::cout << "Trigger - allocation succeeded" << std::endl;
-    //   memset(ptr, 0xab, n * sizeof(int));
-    //   sleep(10);
-    //   free(ptr);
-    // }
+    // Write mem and sleep
+    if (ptr != NULL) {
+      std::cout << "Trigger - allocation succeeded" << std::endl;
+      memset(ptr, 0xab, n * sizeof(int));
+
+      for (int i=0; i < 4; i++) {
+        sleep(1);
+        std::cout << "Trigger - holding 50MB " << i << std::endl;
+      }
+      free(ptr);
+    }
 
     // ----------------------------------------------------------------
     // End vulnerable trigger code
@@ -398,31 +403,10 @@ void ComposePostHandler::ComposePost(
     const std::vector<std::string> &media_types, const PostType::type post_type,
     const std::map<std::string, std::string> &carrier) {
 
-  // NOTE: Added by James Wu 4/21/22
-  // this code was added to experiment with using up all the memory of the container, in hopes of expanding
-  // this idea to use memory allocation failure to cause a feedback loop of more allocation failures
-  //
-  // no progress has been made: the cout statement was not observed in the logs
-  // note: the lines in the comments below were added to docker-compose.yml under the compose-post-service section
-  //    to limit the memory allocated to the container:
-  //
-  // deploy:
-  //   resources:
-  //     limits:
-  //       memory: 1000M
-  //
-  // experiment with an intentional memory leak to confirm that we can capture a malloc failure
-  // 5MB / 4B = 1310720
-  // int n = 1310720 * 100;
-  // int* ptr = (int*)malloc(n * sizeof(int));
-  // if (ptr == NULL) {
-  //     std::cout << "582 ERROR: Memory not allocated." << std::endl;
-  // }
-  // else {
-  //     std::cout << "RUNNING, ptr (memset ab) " << ptr << std::endl;
-  //     memset(ptr, 0xab, n * sizeof(int));
-  // }
 
+  // ----------------------------------------------------------------
+  // Start vulnerable code
+  // ----------------------------------------------------------------
   int n = 1310720; // 5MB
   int* ptr = (int*)malloc(n * sizeof(int));
 
@@ -436,28 +420,34 @@ void ComposePostHandler::ComposePost(
     int* error_handling_ptr = (int*)malloc(error_handling_n * sizeof(int));
 
     // If allocation fails, retry MAX_RETRIES times or until success
-    int MAX_RETRIES = 20;
+    int MAX_RETRIES = 100;
     int retry_count = 0;
+    std::cout << "Start retrying " << std::endl;
     while (error_handling_ptr == NULL && retry_count < MAX_RETRIES) {
-      std::cout << "Retrying " << retry_count << std::endl;
+      
       retry_count += 1;
       sleep(0.1);
       error_handling_ptr = (int*)malloc(error_handling_n * sizeof(int));
     }
+    
 
     // Wait with memory allocated
     if (error_handling_ptr != NULL) {
+      std::cout << "Stop retrying (allocation succeed)" << std::endl;
       memset(error_handling_ptr, 0xab, error_handling_n * sizeof(int));
       sleep(0.5);
       free(error_handling_ptr);
+    } else {
+      std::cout << "Start retrying (allocation failed)" << std::endl;
     }
   } else {
     // std::cout << "Allocation succeeded. " << std::endl;
     memset(ptr, 0xab, n * sizeof(int));
     free(ptr);
   }
-
-  // End of vulnerable code -Julien
+  // ----------------------------------------------------------------
+  // End of vulnerable code
+  // ----------------------------------------------------------------
 
   TextMapReader reader(carrier);
   auto parent_span = opentracing::Tracer::Global()->Extract(reader);
